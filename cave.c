@@ -337,7 +337,7 @@ static void cave_render_screen() {
     }
   }
   // render cursor
-  if (cursor_x >= 0 && cursor_x < screen_cols && cursor_y >= 0 && cursor_y < screen_rows && cursor_visible < CAVE_FPS) {
+  if (cursor_x >= 0 && cursor_x < screen_cols && cursor_y >= 0 && cursor_y < screen_rows && cursor_visible < CAVE_FPS / 2) {
     color = &palette[screen_theme][colors[cursor_x][cursor_y]];
     rect.x = cursor_x * glyph_width; rect.y = cursor_y * glyph_height;
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
@@ -413,8 +413,7 @@ static void cave_loop(lua_State *L) {
     delta_ticks += current_tick - last_tick;
     last_tick = current_tick;
     for (; delta_ticks >= CAVE_FPS_TICKS; delta_ticks -= CAVE_FPS_TICKS) {
-      cursor_visible += 2;
-      if (cursor_visible >= CAVE_FPS * 2) cursor_visible = 0;
+      if (++cursor_visible >= CAVE_FPS) cursor_visible = 0;
       if (cave_push_event_handler(L, "on_update")) lua_call(L, 0, 0);
     }
     // render screen
