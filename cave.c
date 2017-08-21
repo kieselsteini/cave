@@ -30,8 +30,8 @@
 #include "SDL.h"
 #include "lua53.h"
 
-#define CAVE_MAX_COLS       256
-#define CAVE_MAX_ROWS       256
+#define CAVE_COLS           80
+#define CAVE_ROWS           25
 
 #define CAVE_ATLAS_COLS     12
 #define CAVE_ATLAS_ROWS     8
@@ -56,12 +56,12 @@ SDL_Renderer *renderer = NULL;
 SDL_Texture *glyph_atlas = NULL;
 SDL_Rect glyphs[256];
 int glyph_width, glyph_height;
+int font_number = 0;
 
-int screen_cols, screen_rows;
 int screen_theme = 0;
 int screen_fullscreen = SDL_FALSE;
-char characters[CAVE_MAX_COLS][CAVE_MAX_ROWS];
-char colors[CAVE_MAX_COLS][CAVE_MAX_ROWS];
+char characters[CAVE_COLS][CAVE_ROWS];
+char colors[CAVE_COLS][CAVE_ROWS];
 
 int cursor_visible = 0;
 int cursor_x = -1;
@@ -225,8 +225,9 @@ static void cave_setup_window(lua_State *L) {
   SDL_DisplayMode mode;
   int i, width, height;
 
-  width = screen_cols * glyph_width;
-  height = screen_rows * glyph_height;
+  if (screen_fullscreen) return;
+  width = CAVE_COLS * glyph_width;
+  height = CAVE_ROWS * glyph_height;
   if (SDL_RenderSetLogicalSize(renderer, width, height)) luaL_error(L, "SDL_RenderSetLogicalSize() failed: %s", SDL_GetError());
   if ((i = SDL_GetWindowDisplayIndex(window)) < 0) luaL_error(L, "SDL_GetWindowDisplayIndex() failed: %s", SDL_GetError());
   if (SDL_GetDesktopDisplayMode(i, &mode)) luaL_error(L, "SDL_GetDesktopDisplayMode() failed: %s", SDL_GetError());
@@ -238,6 +239,33 @@ static void cave_setup_window(lua_State *L) {
   SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 }
 
+static int cave_load_font(lua_State *L) {
+  char filename[256];
+  int x, y, i;
+  SDL_Surface *surface;
+  SDL_RWops *rw;
+
+  SDL_snprintf(filename, sizeof(filename), "font%d.bmp", font_number);
+  if ((rw = SDL_RWFromFile(filename, "rb")) == NULL) return SDL_FALSE;
+  if ((surface = SDL_LoadBMP_RW(rw, SDL_TRUE)) == NULL) luaL_error(L, "cannot load font " LUA_QS, filename);
+  if (glyph_atlas) SDL_DestroyTexture(glyph_atlas);
+  if ((glyph_atlas = SDL_CreateTextureFromSurface(renderer, surface)) == NULL) luaL_error(L, "SDL_CreateTextureFromSurface() failed: %s", SDL_GetError());
+  glyph_width = surface->w / CAVE_ATLAS_COLS;
+  glyph_height = surface->h / CAVE_ATLAS_ROWS;
+  SDL_zero(glyphs);
+  for (i = ' ', x = 0, y = 0; i <= 128; ++i) {
+    glyphs[i].x = x; glyphs[i].y = y;
+    glyphs[i].w = glyph_width; glyphs[i].h = glyph_height;
+    x += glyph_width;
+    if (x >= surface->w) {
+      x = 0;
+      y += glyph_height;
+    }
+  }
+  SDL_FreeSurface(surface);
+  cave_setup_window(L);
+  return SDL_TRUE;
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -276,19 +304,6 @@ static int l_random(lua_State *L) {
   return 1;
 }
 
-static int l_screen(lua_State *L) {
-  lua_Integer cols = luaL_checkinteger(L, 1);
-  lua_Integer rows = luaL_checkinteger(L, 2);
-  const char *title = luaL_optstring(L, 3, NULL);
-  luaL_argcheck(L, cols > 0 && cols <= CAVE_MAX_COLS, 1, "invalid column count");
-  luaL_argcheck(L, rows > 0 && rows <= CAVE_MAX_ROWS, 2, "invalid row count");
-  screen_cols = (int)cols;
-  screen_rows = (int)rows;
-  if (title) SDL_SetWindowTitle(window, title);
-  cave_setup_window(L);
-  return 0;
-}
-
 static int l_clear(lua_State *L) {
   (void)L;  SDL_zero(characters); return 0;
 }
@@ -299,7 +314,7 @@ static int l_print(lua_State *L) {
   int color = (int)luaL_checkinteger(L, 3);
   const char *text = luaL_checkstring(L, 4);
   for (; *text; ++text, ++x) {
-    if (x >= 0 && x < screen_cols && y >= 0 && y < screen_rows) {
+    if (x >= 0 && x < CAVE_COLS && y >= 0 && y < CAVE_ROWS) {
       characters[x][y] = *text;
       colors[x][y] = (char)color;
     }
@@ -317,7 +332,6 @@ static const luaL_Reg l__funcs[] = {
   { "quit", l_quit },
   { "randomseed", l_randomseed },
   { "random", l_random },
-  { "screen", l_screen },
   { "clear", l_clear },
   { "print", l_print },
   { "cursor", l_cursor },
@@ -343,9 +357,9 @@ static void cave_render_screen() {
   SDL_RenderClear(renderer);
   // render glyphs
   rect.w = glyph_width; rect.h = glyph_height;
-  for (y = 0; y < screen_rows; ++y) {
+  for (y = 0; y < CAVE_ROWS; ++y) {
     rect.y = y * glyph_height;
-    for (x = 0; x < screen_cols; ++x) {
+    for (x = 0; x < CAVE_COLS; ++x) {
       glyph = &glyphs[characters[x][y]];
       if (glyph->w > 0) {
         rect.x = x * glyph_width;
@@ -356,7 +370,7 @@ static void cave_render_screen() {
     }
   }
   // render cursor
-  if (cursor_x >= 0 && cursor_x < screen_cols && cursor_y >= 0 && cursor_y < screen_rows && cursor_visible < CAVE_FPS / 2) {
+  if (cursor_x >= 0 && cursor_x < CAVE_COLS && cursor_y >= 0 && cursor_y < CAVE_ROWS && cursor_visible < CAVE_FPS / 2) {
     color = &palette[screen_theme][colors[cursor_x][cursor_y]];
     rect.x = cursor_x * glyph_width; rect.y = cursor_y * glyph_height;
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
@@ -415,6 +429,9 @@ static void cave_loop(lua_State *L) {
         case SDLK_F8: cave_send_key(L, "F8"); break;
         case SDLK_F9: cave_send_key(L, "F9"); break;
         case SDLK_F10:
+          ++font_number;
+          if (!cave_load_font(L)) font_number = 0;
+          cave_load_font(L);
           break;
         case SDLK_F11:
           if (++screen_theme >= CAVE_NUM_THEMES) screen_theme = 0;
@@ -447,34 +464,12 @@ static void cave_loop(lua_State *L) {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-static void cave_load_font(lua_State *L, const char *filename) {
-  int x, y, i;
-  SDL_Surface *surface;
-
-  if ((surface = SDL_LoadBMP(filename)) == NULL) luaL_error(L, "cannot load font " LUA_QS, filename);
-  if (glyph_atlas) SDL_DestroyTexture(glyph_atlas);
-  if ((glyph_atlas = SDL_CreateTextureFromSurface(renderer, surface)) == NULL) luaL_error(L, "SDL_CreateTextureFromSurface() failed: %s", SDL_GetError());
-  glyph_width = surface->w / CAVE_ATLAS_COLS;
-  glyph_height = surface->h / CAVE_ATLAS_ROWS;
-  SDL_zero(glyphs);
-  for (i = ' ', x = 0, y = 0; i <= 128; ++i) {
-    glyphs[i].x = x; glyphs[i].y = y;
-    glyphs[i].w = glyph_width; glyphs[i].h = glyph_height;
-    x += glyph_width;
-    if (x >= surface->w) {
-      x = 0;
-      y += glyph_height;
-    }
-  }
-  SDL_FreeSurface(surface);
-}
-
 static int cave_init(lua_State *L) {
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_EVENTS)) luaL_error(L, "SDL_Init() failed: %s", SDL_GetError());
   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "2");
   if ((window = SDL_CreateWindow("Cave Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_RESIZABLE)) == NULL) luaL_error(L, "SDL_CreateWindow() failed: %s", SDL_GetError());
   if ((renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC)) == NULL) luaL_error(L, "SDL_CreateRenderer() failed: %s", SDL_GetError());
-  cave_load_font(L, "font.bmp");
+  if (!cave_load_font(L)) luaL_error(L, "Cannot load any font");
   if (luaL_loadfile(L, "game.lua") != LUA_OK) lua_error(L);
   lua_call(L, 0, 0);
   cave_loop(L);
