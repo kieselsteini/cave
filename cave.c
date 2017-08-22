@@ -477,6 +477,7 @@ static int cave_init(lua_State *L) {
 }
 
 static void cave_shutdown() {
+  if (glyph_atlas != NULL) SDL_DestroyTexture(glyph_atlas);
   if (renderer != NULL) SDL_DestroyRenderer(renderer);
   if (window != NULL) SDL_DestroyWindow(window);
   SDL_Quit();
